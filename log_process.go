@@ -6,24 +6,38 @@ import (
 	"time"
 )
 
-type LogProcess struct {
-	rc         chan string // read channel
-	wc         chan string // write channel
-	path       string      // 讀取文件的路徑
-	influxDBsn string      // influx data source
+type Reader interface {
+	Read(rc chan string)
 }
 
-// 使用引用,如果結構體很大時,可以不需要拷貝效能較好. 還可以修改自身定義的參數
-func (l *LogProcess) ReadFromFile() {
+type Writer interface {
+	Write(wc chan string)
+}
+
+type LogProcess struct {
+	rc     chan string // read channel
+	wc     chan string // write channel
+	read   Reader
+	writer Writer
+}
+
+type ReadFromFile struct {
+	path string // 讀取文件的路徑
+}
+
+func (r *ReadFromFile) Read(rc chan string) {
 	// 讀取模塊
 	line := "message"
-	l.rc <- line
+	rc <- line
 }
 
-func (l *LogProcess) WriteToInfluxDB() {
-	// 寫入模塊
-	fmt.Println(<-l.wc)
+type WriteToInfluxDB struct {
+	influxDBsn string // influx data source
+}
 
+func (l *WriteToInfluxDB) Write(wc chan string) {
+	// 寫入模塊
+	fmt.Println(<-wc)
 }
 
 func (l *LogProcess) Process() {
@@ -33,14 +47,21 @@ func (l *LogProcess) Process() {
 }
 
 func main() {
-	lp := &LogProcess{
-		rc:         make(chan string),
-		wc:         make(chan string),
-		path:       "/tmp/access.log",
+	r := &ReadFromFile{
+		path: "/tmp/access.log",
+	}
+	w := &WriteToInfluxDB{
 		influxDBsn: "username&password...",
 	}
-	go lp.ReadFromFile()
+
+	lp := &LogProcess{
+		rc:     make(chan string),
+		wc:     make(chan string),
+		read:   r,
+		writer: w,
+	}
+	go lp.read.Read(lp.rc)
 	go lp.Process()
-	go lp.WriteToInfluxDB()
+	go lp.writer.Write(lp.wc)
 	time.Sleep(time.Second * 1)
 }
