@@ -13,6 +13,7 @@ type LogProcess struct {
 	influxDBsn string      // influx data source
 }
 
+// 使用引用,如果結構體很大時,可以不需要拷貝效能較好. 還可以修改自身定義的參數
 func (l *LogProcess) ReadFromFile() {
 	// 讀取模塊
 	line := "message"
