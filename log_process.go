@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	client "github.com/influxdata/influxdb1-client/v2"
 )
 
 type Reader interface {
@@ -64,13 +67,66 @@ func (r *ReadFromFile) Read(rc chan []byte) {
 }
 
 type WriteToInfluxDB struct {
-	influxDBsn string // influx data source
+	influxDBDsn string // influx data source
 }
 
-func (l *WriteToInfluxDB) Write(wc chan *Message) {
+func (w *WriteToInfluxDB) Write(wc chan *Message) {
 	// 寫入模塊
+	// http://127.0.0.1:8086@username@password@MyDB@s
+	infSli := strings.Split(w.influxDBDsn, "@")
+
+	// 初始化 influxdb client
+	c, err := client.NewHTTPClient(client.HTTPConfig{
+		Addr:     infSli[0],
+		Username: infSli[1],
+		Password: infSli[2],
+	})
+
+	fmt.Printf("%+v \n", c)
+
+	if err != nil {
+		fmt.Println("Error creating InfluxDB Client: ", err.Error())
+	}
+	defer c.Close()
+
+	// write channel 中讀取監控數據
+	// 構造數據並寫入influxdb
+
 	for v := range wc {
-		fmt.Println(v)
+		// Create a new point batch
+		bp, err := client.NewBatchPoints(client.BatchPointsConfig{
+			Database:  infSli[3],
+			Precision: infSli[4],
+		})
+		fmt.Printf("%+v \n", bp)
+		if err != nil {
+			log.Fatal("Error Create a new point batch ", err)
+		}
+
+		// Create a point and add to batch
+		// Tags: Path, Method, Scheme, Status
+		tags := map[string]string{"Path": v.Path, "Method": v.Method, "Scheme": v.Scheme, "Status": v.Status}
+
+		// Fields: UpstreamTime, RequestTime, BytesSent
+		fields := map[string]interface{}{
+			"UpstreamTime": v.UpstreamTime,
+			"RequestTime":  v.RequestTime,
+			"BytesSent":    v.BytesSent,
+		}
+
+		// Time
+		pt, err := client.NewPoint("nginx.log", tags, fields, v.TimeLocal)
+		if err != nil {
+			log.Fatal("NewPoint", err)
+		}
+		bp.AddPoint(pt)
+
+		// Write the batch
+		if err := c.Write(bp); err != nil {
+			log.Fatal("Write the batch ", err)
+		}
+
+		log.Println("write success!")
 	}
 }
 
@@ -141,11 +197,16 @@ func (l *LogProcess) Process() {
 }
 
 func main() {
+	var path, influxDsn string
+	flag.StringVar(&path, "path", "./access.log", "read file path")
+	flag.StringVar(&influxDsn, "influxDsn", "http://127.0.0.1:8086@kimiuser@kimipassword@kk@s", "influx data source")
+	flag.Parse()
+
 	r := &ReadFromFile{
 		path: "./access.log",
 	}
 	w := &WriteToInfluxDB{
-		influxDBsn: "username&password...",
+		influxDBDsn: influxDsn,
 	}
 
 	lp := &LogProcess{
