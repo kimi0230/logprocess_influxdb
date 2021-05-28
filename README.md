@@ -1,8 +1,7 @@
-# imooc_logprocess_practise
+# logprocess_influxdb
 
+Read and write requsets into influxdb Concurrently.
 from imooc [https://www.imooc.com/learn/982](https://www.imooc.com/learn/982) and [imooc_logprocess](https://github.com/itsmikej/imooc_logprocess)
-
-Example read and write requsets into influxdb Concurrently.
 
 ## influxdb
 ### install

@@ -1,4 +1,4 @@
-module imooc_logprocess_practise
+module logprocess_influxdb
 
 go 1.16
 
