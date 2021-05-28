@@ -26,6 +26,9 @@ curl -i -XPOST 'http://localhost:8086/api/v2/write?org=kimiORG&bucket=kk&precisi
  --data-binary "kk,machine_id=1,region=tw value=0.5"
 ```
 
+
+![image](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/data_explore.png)
+
 # Reference
 * https://hub.docker.com/_/influxdb 
 * https://github.com/influxdata/influxdb
