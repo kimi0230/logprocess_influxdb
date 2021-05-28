@@ -19,13 +19,18 @@ docker run -p 8086:8086 \
 influxdb:2.0.6
 ```
 
+
+### test
+``` shell
+curl -i -XPOST 'http://localhost:8086/api/v2/write?org=kimiORG&bucket=kk&precision='  -u kimiuser:kimipassword \
+ --header "Authorization: Token dOrI2xnBcY1A62JZTmcPEoTf30K9I5iro10fwHvSU6xDJK8aXFo_QncuAlxTGruIsQWeu9bq2WEylszu4lTP4A==" \
+ --data-binary "kk,machine_id=1,region=tw value=0.5"
+```
+
 # Reference
 * https://hub.docker.com/_/influxdb 
-* https://github.com/influxdata/influxdb1-client/
+* https://github.com/influxdata/influxdb
+* https://github.com/influxdata/influxdb-client-go
 * https://docs.influxdata.com/influxdb/v2.0/
 * https://db-engines.com/en/ranking
 
-
-curl -i -XPOST 'http://127.0.0.1:8086/write?db=mydb'  -u kimiuser:kimipassword \
- --header "Authorization: Token iLDSvb1q2I5C2e5eyElYhM37n5Y2TQbwJhQyVNgaK3tSDWbJMM_m1kUbwoRvVsiAt5ytJdiWuHTCrd8Cf08Q5A==" \
- --data-binary 'mydb,machine_id=1,region=tw value=0.5'

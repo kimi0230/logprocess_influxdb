@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	client "github.com/influxdata/influxdb1-client/v2"
+	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
 )
 
 type Reader interface {
@@ -72,38 +72,23 @@ type WriteToInfluxDB struct {
 
 func (w *WriteToInfluxDB) Write(wc chan *Message) {
 	// 寫入模塊
-	// http://127.0.0.1:8086@username@password@MyDB@s
+	// http://127.0.0.1:8086@kimiORG@kk@myMeasure@s
 	infSli := strings.Split(w.influxDBDsn, "@")
 
-	// 初始化 influxdb client
-	c, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     infSli[0],
-		Username: infSli[1],
-		Password: infSli[2],
-	})
+	// You can generate a Token from the "Tokens Tab" in the UI
+	org := infSli[1]
+	bucket := infSli[2]
+	measure := infSli[3]
 
-	fmt.Printf("%+v \n", c)
-
-	if err != nil {
-		fmt.Println("Error creating InfluxDB Client: ", err.Error())
-	}
-	defer c.Close()
+	client := influxdb2.NewClient("http://127.0.0.1:8086", token)
+	// always close client at the end
+	defer client.Close()
+	client.Options()
+	writeAPI := client.WriteAPI(org, bucket)
 
 	// write channel 中讀取監控數據
-	// 構造數據並寫入influxdb
-
 	for v := range wc {
-		// Create a new point batch
-		bp, err := client.NewBatchPoints(client.BatchPointsConfig{
-			Database:  infSli[3],
-			Precision: infSli[4],
-		})
-		fmt.Printf("%+v \n", bp)
-		if err != nil {
-			log.Fatal("Error Create a new point batch ", err)
-		}
-
-		// Create a point and add to batch
+		// 構造數據並寫入influxdb
 		// Tags: Path, Method, Scheme, Status
 		tags := map[string]string{"Path": v.Path, "Method": v.Method, "Scheme": v.Scheme, "Status": v.Status}
 
@@ -114,17 +99,15 @@ func (w *WriteToInfluxDB) Write(wc chan *Message) {
 			"BytesSent":    v.BytesSent,
 		}
 
-		// Time
-		pt, err := client.NewPoint("nginx.log", tags, fields, v.TimeLocal)
-		if err != nil {
-			log.Fatal("NewPoint", err)
-		}
-		bp.AddPoint(pt)
-
 		// Write the batch
-		if err := c.Write(bp); err != nil {
-			log.Fatal("Write the batch ", err)
-		}
+		p := influxdb2.NewPoint(
+			measure,
+			tags,
+			fields,
+			v.TimeLocal)
+
+		// write point asynchronously
+		writeAPI.WritePoint(p)
 
 		log.Println("write success!")
 	}
@@ -196,10 +179,12 @@ func (l *LogProcess) Process() {
 	}
 }
 
+const token = "dOrI2xnBcY1A62JZTmcPEoTf30K9I5iro10fwHvSU6xDJK8aXFo_QncuAlxTGruIsQWeu9bq2WEylszu4lTP4A=="
+
 func main() {
 	var path, influxDsn string
 	flag.StringVar(&path, "path", "./access.log", "read file path")
-	flag.StringVar(&influxDsn, "influxDsn", "http://127.0.0.1:8086@kimiuser@kimipassword@kk@s", "influx data source")
+	flag.StringVar(&influxDsn, "influxDsn", "http://127.0.0.1:8086@kimiORG@kk@myMeasure@s", "influx data source")
 	flag.Parse()
 
 	r := &ReadFromFile{
