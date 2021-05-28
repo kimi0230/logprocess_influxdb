@@ -22,11 +22,10 @@ influxdb:2.0.6
 # Reference
 * https://hub.docker.com/_/influxdb 
 * https://github.com/influxdata/influxdb1-client/
+* https://docs.influxdata.com/influxdb/v2.0/
+* https://db-engines.com/en/ranking
 
 
-curl --request POST 'http://127.0.0.1:8086/write?db=kk&precision=s' \
+curl -i -XPOST 'http://127.0.0.1:8086/write?db=mydb'  -u kimiuser:kimipassword \
  --header "Authorization: Token iLDSvb1q2I5C2e5eyElYhM37n5Y2TQbwJhQyVNgaK3tSDWbJMM_m1kUbwoRvVsiAt5ytJdiWuHTCrd8Cf08Q5A==" \
- --data-urlencode "Method=POST,Scheme=ss,Status=sst" \
-  --data-urlencode "bucket=example-bucket"
-  
-   --data-binary 'kk,Method=POST,Scheme=ss,Status=sst' --header "Authorization: Token iLDSvb1q2I5C2e5eyElYhM37n5Y2TQbwJhQyVNgaK3tSDWbJMM_m1kUbwoRvVsiAt5ytJdiWuHTCrd8Cf08Q5A=="
+ --data-binary 'mydb,machine_id=1,region=tw value=0.5'
