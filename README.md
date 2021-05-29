@@ -21,9 +21,26 @@ influxdb:2.0.6
 
 ### test
 ``` shell
-curl -i -XPOST 'http://localhost:8086/api/v2/write?org=kimiORG&bucket=kk&precision='  -u kimiuser:kimipassword \
- --header "Authorization: Token dOrI2xnBcY1A62JZTmcPEoTf30K9I5iro10fwHvSU6xDJK8aXFo_QncuAlxTGruIsQWeu9bq2WEylszu4lTP4A==" \
+curl -i -XPOST 'http://localhost:8086/api/v2/write?org=kimiORG&bucket=kk&precision=s'  -u kimiuser:kimipassword \
+ --header "Authorization: Token I7XePMLi3cx-j4PjnpkMC1_jImyEikWCSL9ar7hNC4Ji4IEucISYgULyl2AORJdPaTrf2PixpZz2euSAzQLfCw==" \
  --data-binary "kk,machine_id=1,region=tw value=0.5"
+```
+## grafana
+### install & run
+``` shell
+docker run -d -p 3000:3000 grafana/grafana
+```
+default account/passwword is `admin/admin`
+
+
+## docker compose
+``` shell
+# 背景執行
+docker-compose up -d
+# 停止執行
+docker-compose stop
+# 停用再移除  
+docker-compose rm -s
 ```
 
 
