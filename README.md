@@ -43,6 +43,10 @@ docker-compose stop
 docker-compose rm -s
 ```
 
+## System Info
+``` shell
+curl 127.0.0.1:9193/monitor
+```
 
 ![influxDB](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/data_explore.png)
 ![grafana](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/grafana.png)

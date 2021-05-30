@@ -27,10 +27,10 @@ type Writer interface {
 }
 
 type LogProcess struct {
-	rc     chan []byte   // read channel
-	wc     chan *Message // write channel
-	read   Reader
-	writer Writer
+	rc    chan []byte   // read channel
+	wc    chan *Message // write channel
+	read  Reader
+	write Writer
 }
 
 type Message struct {
@@ -265,14 +265,18 @@ func main() {
 	}
 
 	lp := &LogProcess{
-		rc:     make(chan []byte),
-		wc:     make(chan *Message),
-		read:   r,
-		writer: w,
+		rc:    make(chan []byte, 200), // 讀取的模塊會比解析來得快, 所以使用buffer的 channel
+		wc:    make(chan *Message, 200),
+		read:  r,
+		write: w,
 	}
 	go lp.read.Read(lp.rc)
-	go lp.Process()
-	go lp.writer.Write(lp.wc)
+	for i := 0; i < 2; i++ {
+		go lp.Process()
+	}
+	for i := 0; i < 4; i++ {
+		go lp.write.Write(lp.wc)
+	}
 
 	// 監控模組
 	m := &Monitor{
