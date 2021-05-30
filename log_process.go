@@ -179,7 +179,7 @@ func (l *LogProcess) Process() {
 	}
 }
 
-const token = "dOrI2xnBcY1A62JZTmcPEoTf30K9I5iro10fwHvSU6xDJK8aXFo_QncuAlxTGruIsQWeu9bq2WEylszu4lTP4A=="
+const token = "DnTFbAQGqnbCyFVXYIuh1NCwjYKWtfRDnnD6Ej1I2I-yIDR5CKZ4KV87Pcx1hgfuUFJeQseaBNsB1M92lyf1Yg=="
 
 func main() {
 	var path, influxDsn string
@@ -203,5 +203,5 @@ func main() {
 	go lp.read.Read(lp.rc)
 	go lp.Process()
 	go lp.writer.Write(lp.wc)
-	time.Sleep(time.Second * 30)
+	time.Sleep(time.Second * 60)
 }

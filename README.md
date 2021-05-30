@@ -22,7 +22,7 @@ influxdb:2.0.6
 ### test
 ``` shell
 curl -i -XPOST 'http://localhost:8086/api/v2/write?org=kimiORG&bucket=kk&precision=s'  -u kimiuser:kimipassword \
- --header "Authorization: Token I7XePMLi3cx-j4PjnpkMC1_jImyEikWCSL9ar7hNC4Ji4IEucISYgULyl2AORJdPaTrf2PixpZz2euSAzQLfCw==" \
+ --header "Authorization: Token rOdFRpyoGg9aGQKt6GhUlBHgkmFOCX5HNIirOmBU3fCFbiwAY4jviMtbxtBBJ9cry_OGiEjieHrEPnfSeRO1mw==" \
  --data-binary "kk,machine_id=1,region=tw value=0.5"
 ```
 ## grafana
@@ -44,7 +44,8 @@ docker-compose rm -s
 ```
 
 
-![image](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/data_explore.png)
+![influxDB](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/data_explore.png)
+![grafana](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/grafana.png)
 
 # Reference
 * https://hub.docker.com/_/influxdb 

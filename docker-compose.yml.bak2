@@ -2,14 +2,15 @@ version: '3'
 services:
   influxdb:
     container_name: influxdb
-    image: influxdb:2.0.5
+    image: influxdb:2.0.6
     ports:
       - "8086:8086"
     restart: always
     # volumes:
     #   - /data/influxdb:/var/lib/influxdb
-    # networks:
-    #   - grafana
+    networks:
+      grafana:
+        ipv4_address: 172.28.0.3
 
   grafana:
     container_name: grafana
@@ -20,11 +21,17 @@ services:
     # volumes:
     #   - /data/grafana:/var/lib/grafana
     restart: always
-    # networks:
-    #   - grafana
+    networks:
+      grafana:
+        ipv4_address: 172.28.0.4
     depends_on:
       - influxdb
 
-# networks:
-#   grafana:
-#     driver: bridge
+networks:
+  grafana:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
+          gateway: 172.28.0.1
