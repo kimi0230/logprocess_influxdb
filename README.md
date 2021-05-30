@@ -37,10 +37,24 @@ default account/passwword is `admin/admin`
 
 ## docker compose
 ``` shell
-# Background execution
+# Background execution (docker run)
 docker-compose up -d
-# Stop execution
+
+# (docker ps)
+docker-compose ps 
+
+# show logs (docker logs)
+docker-compose logs
+
+# start (docker start)
+docker-compose start
+
+# Stop execution (docker stop)
 docker-compose stop
+
+# remove (docker rm)
+docker-compose down
+
 # Stop execution, then remove  
 docker-compose rm -s
 ```
