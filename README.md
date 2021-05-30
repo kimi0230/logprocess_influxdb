@@ -1,7 +1,9 @@
 # logprocess_influxdb
 
-Read and write requsets into influxdb Concurrently.
-from imooc [https://www.imooc.com/learn/982](https://www.imooc.com/learn/982) and [imooc_logprocess](https://github.com/itsmikej/imooc_logprocess)
+Read and write requsets into [influxdb](https://www.influxdata.com/) Concurrently.
+Logs in Explore by [grafana](https://grafana.com/).
+
+From imooc [https://www.imooc.com/learn/982](https://www.imooc.com/learn/982) and [imooc_logprocess](https://github.com/itsmikej/imooc_logprocess)
 
 ## influxdb
 ### install
@@ -35,15 +37,15 @@ default account/passwword is `admin/admin`
 
 ## docker compose
 ``` shell
-# 背景執行
+# Background execution
 docker-compose up -d
-# 停止執行
+# Stop execution
 docker-compose stop
-# 停用再移除  
+# Stop execution, then remove  
 docker-compose rm -s
 ```
 
-## System Info
+## System Info API
 ``` shell
 curl 127.0.0.1:9193/monitor
 ```
