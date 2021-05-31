@@ -64,7 +64,10 @@ docker-compose rm -s
 curl 127.0.0.1:9193/monitor
 ```
 
+## Screenshot
+### influxDB
 ![influxDB](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/data_explore.png)
+### grafana
 ![grafana](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/grafana.png)
 
 # Reference
