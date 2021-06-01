@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
@@ -108,18 +109,25 @@ type Message struct {
 
 // 系統狀態監控
 type SystemInfo struct {
-	HandleLine   int     `json:"handleLine"`   // 總處理log行數
-	Tps          float64 `json:"tps"`          // 系統吞吐量
-	ReadChanLen  int     `json:"readChanLen"`  // read channel 長度
-	WriteChanLen int     `json:"writeChanLen"` // write channel 長度
-	RunTime      string  `json:"runTime"`      // 總運行時間
-	ErrNum       int     `json:"errNum"`       // 總錯誤
+	HandleLine   int       `json:"handleLine"`   // 總處理log行數
+	Tps          float64   `json:"tps"`          // 系統吞吐量
+	ReadChanLen  int       `json:"readChanLen"`  // read channel 長度
+	WriteChanLen int       `json:"writeChanLen"` // write channel 長度
+	RunTime      string    `json:"runTime"`      // 總運行時間
+	ErrInfo      ErrorInfo `json:"errInfo"`
+}
+
+type ErrorInfo struct {
+	ReadErr    int `json:"readErr"`
+	ProcessErr int `json:"processErr"`
+	WriteErr   int `json:"writeErr"`
 }
 
 const (
 	TypeHandleLine = iota
 	TypeReadErr
-	TypeErrNum
+	TypeProcessErr
+	TypeWriteErr
 )
 
 var (
@@ -129,19 +137,24 @@ var (
 )
 
 type Monitor struct {
-	startTime time.Time
-	data      SystemInfo
-	tpsSli    []int
+	listenPort string
+	startTime  time.Time
+	tpsSli     []int
+	systemInfo SystemInfo
 }
 
 func (m *Monitor) start(lp *LogProcess) {
 	go func() {
 		for n := range TypeMonitorChan {
 			switch n {
-			case TypeErrNum:
-				m.data.ErrNum += 1
 			case TypeHandleLine:
-				m.data.HandleLine += 1
+				m.systemInfo.HandleLine += 1
+			case TypeReadErr:
+				m.systemInfo.ErrInfo.ReadErr += 1
+			case TypeProcessErr:
+				m.systemInfo.ErrInfo.ProcessErr += 1
+			case TypeWriteErr:
+				m.systemInfo.ErrInfo.WriteErr += 1
 			}
 		}
 	}()
@@ -150,7 +163,7 @@ func (m *Monitor) start(lp *LogProcess) {
 	go func() {
 		for {
 			<-ticker.C
-			m.tpsSli = append(m.tpsSli, m.data.HandleLine)
+			m.tpsSli = append(m.tpsSli, m.systemInfo.HandleLine)
 			if len(m.tpsSli) > 2 {
 				m.tpsSli = m.tpsSli[1:]
 			}
@@ -158,20 +171,23 @@ func (m *Monitor) start(lp *LogProcess) {
 	}()
 
 	http.HandleFunc("/monitor", func(writer http.ResponseWriter, request *http.Request) {
-		m.data.RunTime = time.Now().Sub(m.startTime).String()
-		m.data.ReadChanLen = len(lp.rc)
-		m.data.WriteChanLen = len(lp.wc)
-
-		// 計算吞吐量
-		if len(m.tpsSli) >= 2 {
-			m.data.Tps = float64(m.tpsSli[1]-m.tpsSli[0]) / 5
-		}
-
-		ret, _ := json.MarshalIndent(m.data, "", "\t")
-		io.WriteString(writer, string(ret))
+		io.WriteString(writer, m.systemStatus(lp))
 	})
 
-	http.ListenAndServe(":9193", nil)
+	http.ListenAndServe(":"+m.listenPort, nil)
+}
+
+func (m *Monitor) systemStatus(lp *LogProcess) string {
+	d := time.Now().Sub(m.startTime)
+	m.systemInfo.RunTime = d.String()
+	m.systemInfo.ReadChanLen = len(lp.rc)
+	m.systemInfo.WriteChanLen = len(lp.wc)
+	if len(m.tpsSli) >= 2 {
+		// return math.Trunc(float64(m.tpsSli[1]-m.tpsSli[0])/5*1e3+0.5) * 1e-3
+		m.systemInfo.Tps = float64(m.tpsSli[1]-m.tpsSli[0]) / 5
+	}
+	res, _ := json.MarshalIndent(m.systemInfo, "", "\t")
+	return string(res)
 }
 
 type InfluxConf struct {
@@ -206,7 +222,7 @@ func NewWriter(influxDsn string, token string) (Writer, error) {
 // 寫入模塊
 func (w *WriteToInfluxDB) Write(wc chan *Message) {
 	client := influxdb2.NewClient(w.influxConf.Addr, w.influxConf.Token)
-	fmt.Println("w.influxConf.Token", w.influxConf.Token)
+
 	// always close client at the end
 	defer client.Close()
 	client.Options()
@@ -261,7 +277,7 @@ func (l *LogProcess) Process() {
 		TypeMonitorChan <- TypeHandleLine
 		ret := r.FindStringSubmatch(string(v))
 		if len(ret) != 14 {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeHandleLine
 			log.Println("FindStringSubmatch fail:", string(v))
 			continue
 		}
@@ -269,7 +285,7 @@ func (l *LogProcess) Process() {
 		// [04/Mar/2018:13:49:52 +0000]
 		t, err := time.ParseInLocation("02/Jan/2006:15:04:05 +0000", ret[4], loc)
 		if err != nil {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeProcessErr
 			log.Println("ParseInLocation fail:", err.Error(), ret[4])
 			continue
 		}
@@ -283,7 +299,7 @@ func (l *LogProcess) Process() {
 		// GET /foo?query=t HTTP/1.0
 		reqSli := strings.Split(ret[6], " ")
 		if len(reqSli) != 3 {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeProcessErr
 			log.Println("strings.Split fail", ret[6])
 			continue
 		}
@@ -292,7 +308,7 @@ func (l *LogProcess) Process() {
 
 		u, err := url.Parse(reqSli[1])
 		if err != nil {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeProcessErr
 			log.Println("url parse fail:", err)
 			continue
 		}
@@ -335,7 +351,6 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println("token", token)
 	writer, err := NewWriter(influxDsn, token)
 	if err != nil {
 		panic(err)
@@ -349,17 +364,31 @@ func main() {
 	}
 
 	go lp.read.Read(lp.rc)
-	for i := 0; i < 2; i++ {
+	for i := 0; i < processNum; i++ {
 		go lp.Process()
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < writeNum; i++ {
 		go lp.write.Write(lp.wc)
 	}
 
 	// 監控模組
 	m := &Monitor{
-		startTime: time.Now(),
-		data:      SystemInfo{},
+		listenPort: listenPort,
+		startTime:  time.Now(),
 	}
 	m.start(lp)
+
+	c := make(chan os.Signal)
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGUSR1)
+	for s := range c {
+		switch s {
+		case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
+			log.Println("capture exit signal:", s)
+			os.Exit(1)
+		case syscall.SIGUSR1: // 用戶自訂訊號
+			log.Println(m.systemStatus(lp))
+		default:
+			log.Println("capture other signal:", s)
+		}
+	}
 }
