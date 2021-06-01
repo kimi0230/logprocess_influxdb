@@ -1,4 +1,4 @@
-# logprocess_influxdb
+# logprocess_influxdb 2.0
 
 Read and write requsets into [influxdb](https://www.influxdata.com/) Concurrently.
 Logs in Explore by [grafana](https://grafana.com/).
@@ -35,7 +35,7 @@ docker run -d -p 3000:3000 grafana/grafana
 default account/passwword is `admin/admin`
 
 
-## docker compose
+## Demo: docker compose
 ``` shell
 # Background execution (docker run)
 docker-compose up -d
@@ -76,4 +76,3 @@ curl 127.0.0.1:9193/monitor
 * https://github.com/influxdata/influxdb-client-go
 * https://docs.influxdata.com/influxdb/v2.0/
 * https://db-engines.com/en/ranking
-
