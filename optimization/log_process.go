@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -23,6 +24,9 @@ type Reader interface {
 	Read(rc chan []byte)
 }
 
+type Writer interface {
+	Write(wc chan *Message)
+}
 type ReadFromTail struct {
 	inode uint64
 	fd    *os.File
@@ -46,6 +50,7 @@ func NewReader(path string) (Reader, error) {
 	}, nil
 }
 
+// 讀取模塊
 func (r *ReadFromTail) Read(rc chan []byte) {
 	defer close(rc)
 	var stat syscall.Stat_t
@@ -85,10 +90,6 @@ func (r *ReadFromTail) Read(rc chan []byte) {
 
 		rc <- line[:len(line)-1]
 	}
-}
-
-type Writer interface {
-	Write(wc chan *Message)
 }
 
 type LogProcess struct {
@@ -173,31 +174,54 @@ func (m *Monitor) start(lp *LogProcess) {
 	http.ListenAndServe(":9193", nil)
 }
 
+type InfluxConf struct {
+	Addr, Token, Organization, Bucket, Measurement, Precision string
+}
 type WriteToInfluxDB struct {
-	influxDBDsn string // influx data source
+	// batch      uint16
+	// retry      uint8 // 寫入失敗時使用, influx2似乎沒有回傳錯誤
+	influxConf *InfluxConf
 }
 
+// influxDsn: http://ip:port@Organization@bucket@measurement@precision
+func NewWriter(influxDsn string, token string) (Writer, error) {
+	influxDsnSli := strings.Split(influxDsn, "@")
+	if len(influxDsnSli) < 5 {
+		return nil, errors.New("param influxDns err")
+	}
+	return &WriteToInfluxDB{
+		// batch: 50,
+		// retry: 3,
+		influxConf: &InfluxConf{
+			Addr:         influxDsnSli[0],
+			Organization: influxDsnSli[1],
+			Bucket:       influxDsnSli[2],
+			Measurement:  influxDsnSli[3],
+			Precision:    influxDsnSli[4],
+			Token:        token,
+		},
+	}, nil
+}
+
+// 寫入模塊
 func (w *WriteToInfluxDB) Write(wc chan *Message) {
-	// 寫入模塊
-	// http://127.0.0.1:8086@kimiORG@kk@myMeasure@s
-	infSli := strings.Split(w.influxDBDsn, "@")
-
-	// You can generate a Token from the "Tokens Tab" in the UI
-	org := infSli[1]
-	bucket := infSli[2]
-	measure := infSli[3]
-
-	client := influxdb2.NewClient("http://127.0.0.1:8086", token)
+	client := influxdb2.NewClient(w.influxConf.Addr, w.influxConf.Token)
+	fmt.Println("w.influxConf.Token", w.influxConf.Token)
 	// always close client at the end
 	defer client.Close()
 	client.Options()
-	writeAPI := client.WriteAPI(org, bucket)
+	writeAPI := client.WriteAPI(w.influxConf.Organization, w.influxConf.Bucket)
 
 	// write channel 中讀取監控數據
 	for v := range wc {
 		// 構造數據並寫入influxdb
 		// Tags: Path, Method, Scheme, Status
-		tags := map[string]string{"Path": v.Path, "Method": v.Method, "Scheme": v.Scheme, "Status": v.Status}
+		tags := map[string]string{
+			"Path":   v.Path,
+			"Method": v.Method,
+			"Scheme": v.Scheme,
+			"Status": v.Status,
+		}
 
 		// Fields: UpstreamTime, RequestTime, BytesSent
 		fields := map[string]interface{}{
@@ -208,7 +232,7 @@ func (w *WriteToInfluxDB) Write(wc chan *Message) {
 
 		// Write the batch
 		p := influxdb2.NewPoint(
-			measure,
+			w.influxConf.Measurement,
 			tags,
 			fields,
 			v.TimeLocal)
@@ -218,11 +242,11 @@ func (w *WriteToInfluxDB) Write(wc chan *Message) {
 
 		log.Println("write success!")
 	}
+
 }
 
+// 解析模塊
 func (l *LogProcess) Process() {
-	// 解析模塊
-
 	/**
 	172.0.0.12 - - [04/Mar/2018:13:49:52 +0000] http "GET /foo?query=t HTTP/1.0" 200 2133 "-" "KeepAliveClient" "-" 1.005 1.854
 	*/
@@ -311,16 +335,19 @@ func main() {
 		panic(err)
 	}
 
-	w := &WriteToInfluxDB{
-		influxDBDsn: influxDsn,
+	fmt.Println("token", token)
+	writer, err := NewWriter(influxDsn, token)
+	if err != nil {
+		panic(err)
 	}
 
 	lp := &LogProcess{
 		rc:    make(chan []byte, 200), // 讀取的模塊會比解析來得快, 所以使用buffer的 channel
 		wc:    make(chan *Message, 200),
 		read:  reader,
-		write: w,
+		write: writer,
 	}
+
 	go lp.read.Read(lp.rc)
 	for i := 0; i < 2; i++ {
 		go lp.Process()
