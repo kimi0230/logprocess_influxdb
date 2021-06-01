@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,12 +25,33 @@ type Reader interface {
 	Read(rc chan []byte)
 }
 
+type Writer interface {
+	Write(wc chan *Message)
+}
 type ReadFromTail struct {
 	inode uint64
 	fd    *os.File
 	path  string
 }
 
+func NewReader(path string) (Reader, error) {
+	var stat syscall.Stat_t
+	if err := syscall.Stat(path, &stat); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ReadFromTail{
+		inode: stat.Ino,
+		fd:    f,
+		path:  path,
+	}, nil
+}
+
+// 讀取模塊
 func (r *ReadFromTail) Read(rc chan []byte) {
 	defer close(rc)
 	var stat syscall.Stat_t
@@ -70,10 +93,6 @@ func (r *ReadFromTail) Read(rc chan []byte) {
 	}
 }
 
-type Writer interface {
-	Write(wc chan *Message)
-}
-
 type LogProcess struct {
 	rc    chan []byte   // read channel
 	wc    chan *Message // write channel
@@ -90,18 +109,25 @@ type Message struct {
 
 // 系統狀態監控
 type SystemInfo struct {
-	HandleLine   int     `json:"handleLine"`   // 總處理log行數
-	Tps          float64 `json:"tps"`          // 系統吞吐量
-	ReadChanLen  int     `json:"readChanLen"`  // read channel 長度
-	WriteChanLen int     `json:"writeChanLen"` // write channel 長度
-	RunTime      string  `json:"runTime"`      // 總運行時間
-	ErrNum       int     `json:"errNum"`       // 總錯誤
+	HandleLine   int       `json:"handleLine"`   // 總處理log行數
+	Tps          float64   `json:"tps"`          // 系統吞吐量
+	ReadChanLen  int       `json:"readChanLen"`  // read channel 長度
+	WriteChanLen int       `json:"writeChanLen"` // write channel 長度
+	RunTime      string    `json:"runTime"`      // 總運行時間
+	ErrInfo      ErrorInfo `json:"errInfo"`
+}
+
+type ErrorInfo struct {
+	ReadErr    int `json:"readErr"`
+	ProcessErr int `json:"processErr"`
+	WriteErr   int `json:"writeErr"`
 }
 
 const (
 	TypeHandleLine = iota
 	TypeReadErr
-	TypeErrNum
+	TypeProcessErr
+	TypeWriteErr
 )
 
 var (
@@ -111,19 +137,24 @@ var (
 )
 
 type Monitor struct {
-	startTime time.Time
-	data      SystemInfo
-	tpsSli    []int
+	listenPort string
+	startTime  time.Time
+	tpsSli     []int
+	systemInfo SystemInfo
 }
 
 func (m *Monitor) start(lp *LogProcess) {
 	go func() {
 		for n := range TypeMonitorChan {
 			switch n {
-			case TypeErrNum:
-				m.data.ErrNum += 1
 			case TypeHandleLine:
-				m.data.HandleLine += 1
+				m.systemInfo.HandleLine += 1
+			case TypeReadErr:
+				m.systemInfo.ErrInfo.ReadErr += 1
+			case TypeProcessErr:
+				m.systemInfo.ErrInfo.ProcessErr += 1
+			case TypeWriteErr:
+				m.systemInfo.ErrInfo.WriteErr += 1
 			}
 		}
 	}()
@@ -132,7 +163,7 @@ func (m *Monitor) start(lp *LogProcess) {
 	go func() {
 		for {
 			<-ticker.C
-			m.tpsSli = append(m.tpsSli, m.data.HandleLine)
+			m.tpsSli = append(m.tpsSli, m.systemInfo.HandleLine)
 			if len(m.tpsSli) > 2 {
 				m.tpsSli = m.tpsSli[1:]
 			}
@@ -140,93 +171,73 @@ func (m *Monitor) start(lp *LogProcess) {
 	}()
 
 	http.HandleFunc("/monitor", func(writer http.ResponseWriter, request *http.Request) {
-		m.data.RunTime = time.Now().Sub(m.startTime).String()
-		m.data.ReadChanLen = len(lp.rc)
-		m.data.WriteChanLen = len(lp.wc)
-
-		// 計算吞吐量
-		if len(m.tpsSli) >= 2 {
-			m.data.Tps = float64(m.tpsSli[1]-m.tpsSli[0]) / 5
-		}
-
-		ret, _ := json.MarshalIndent(m.data, "", "\t")
-		io.WriteString(writer, string(ret))
+		io.WriteString(writer, m.systemStatus(lp))
 	})
 
-	http.ListenAndServe(":9193", nil)
+	http.ListenAndServe(":"+m.listenPort, nil)
 }
 
-func NewReader(path string) (Reader, error) {
-	var stat syscall.Stat_t
-	if err := syscall.Stat(path, &stat); err != nil {
-		return nil, err
+func (m *Monitor) systemStatus(lp *LogProcess) string {
+	d := time.Now().Sub(m.startTime)
+	m.systemInfo.RunTime = d.String()
+	m.systemInfo.ReadChanLen = len(lp.rc)
+	m.systemInfo.WriteChanLen = len(lp.wc)
+	if len(m.tpsSli) >= 2 {
+		// return math.Trunc(float64(m.tpsSli[1]-m.tpsSli[0])/5*1e3+0.5) * 1e-3
+		m.systemInfo.Tps = float64(m.tpsSli[1]-m.tpsSli[0]) / 5
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
+	res, _ := json.MarshalIndent(m.systemInfo, "", "\t")
+	return string(res)
+}
 
-	return &ReadFromTail{
-		inode: stat.Ino,
-		fd:    f,
-		path:  path,
+type InfluxConf struct {
+	Addr, Token, Organization, Bucket, Measurement, Precision string
+}
+type WriteToInfluxDB struct {
+	// batch      uint16
+	// retry      uint8 // 寫入失敗時使用, influx2似乎沒有回傳錯誤
+	influxConf *InfluxConf
+}
+
+// influxDsn: http://ip:port@Organization@bucket@measurement@precision
+func NewWriter(influxDsn string, token string) (Writer, error) {
+	influxDsnSli := strings.Split(influxDsn, "@")
+	if len(influxDsnSli) < 5 {
+		return nil, errors.New("param influxDns err")
+	}
+	return &WriteToInfluxDB{
+		// batch: 50,
+		// retry: 3,
+		influxConf: &InfluxConf{
+			Addr:         influxDsnSli[0],
+			Organization: influxDsnSli[1],
+			Bucket:       influxDsnSli[2],
+			Measurement:  influxDsnSli[3],
+			Precision:    influxDsnSli[4],
+			Token:        token,
+		},
 	}, nil
 }
 
-type ReadFromFile struct {
-	path string // 讀取文件的路徑
-}
-
-func (r *ReadFromFile) Read(rc chan []byte) {
-	// 讀取模塊
-	// 打開文件
-	f, err := os.Open(r.path)
-	if err != nil {
-		panic(fmt.Sprintf("open file error : %s", err.Error()))
-	}
-	// 從文件末尾開始執行讀取
-	f.Seek(0, 2)
-	rd := bufio.NewReader(f)
-	for {
-		line, err := rd.ReadBytes('\n')
-		if err == io.EOF {
-			// 讀到末尾
-			time.Sleep(500 * time.Microsecond)
-			continue
-		} else if err != nil {
-			panic(fmt.Sprintf("ReadBytes error : %s", err.Error()))
-		}
-		// 寫入到 read channel
-		TypeMonitorChan <- TypeHandleLine
-		rc <- line[:len(line)-1]
-	}
-}
-
-type WriteToInfluxDB struct {
-	influxDBDsn string // influx data source
-}
-
+// 寫入模塊
 func (w *WriteToInfluxDB) Write(wc chan *Message) {
-	// 寫入模塊
-	// http://127.0.0.1:8086@kimiORG@kk@myMeasure@s
-	infSli := strings.Split(w.influxDBDsn, "@")
+	client := influxdb2.NewClient(w.influxConf.Addr, w.influxConf.Token)
 
-	// You can generate a Token from the "Tokens Tab" in the UI
-	org := infSli[1]
-	bucket := infSli[2]
-	measure := infSli[3]
-
-	client := influxdb2.NewClient("http://127.0.0.1:8086", token)
 	// always close client at the end
 	defer client.Close()
 	client.Options()
-	writeAPI := client.WriteAPI(org, bucket)
+	writeAPI := client.WriteAPI(w.influxConf.Organization, w.influxConf.Bucket)
 
 	// write channel 中讀取監控數據
 	for v := range wc {
 		// 構造數據並寫入influxdb
 		// Tags: Path, Method, Scheme, Status
-		tags := map[string]string{"Path": v.Path, "Method": v.Method, "Scheme": v.Scheme, "Status": v.Status}
+		tags := map[string]string{
+			"Path":   v.Path,
+			"Method": v.Method,
+			"Scheme": v.Scheme,
+			"Status": v.Status,
+		}
 
 		// Fields: UpstreamTime, RequestTime, BytesSent
 		fields := map[string]interface{}{
@@ -237,7 +248,7 @@ func (w *WriteToInfluxDB) Write(wc chan *Message) {
 
 		// Write the batch
 		p := influxdb2.NewPoint(
-			measure,
+			w.influxConf.Measurement,
 			tags,
 			fields,
 			v.TimeLocal)
@@ -247,11 +258,11 @@ func (w *WriteToInfluxDB) Write(wc chan *Message) {
 
 		log.Println("write success!")
 	}
+
 }
 
+// 解析模塊
 func (l *LogProcess) Process() {
-	// 解析模塊
-
 	/**
 	172.0.0.12 - - [04/Mar/2018:13:49:52 +0000] http "GET /foo?query=t HTTP/1.0" 200 2133 "-" "KeepAliveClient" "-" 1.005 1.854
 	*/
@@ -263,21 +274,22 @@ func (l *LogProcess) Process() {
 	// 從 read channel 中讀取每行日誌數據
 	for v := range l.rc {
 		// 第 0 項是數據本身
+		TypeMonitorChan <- TypeHandleLine
 		ret := r.FindStringSubmatch(string(v))
 		if len(ret) != 14 {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeHandleLine
 			log.Println("FindStringSubmatch fail:", string(v))
 			continue
 		}
-		message := &Message{}
 
 		// [04/Mar/2018:13:49:52 +0000]
 		t, err := time.ParseInLocation("02/Jan/2006:15:04:05 +0000", ret[4], loc)
 		if err != nil {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeProcessErr
 			log.Println("ParseInLocation fail:", err.Error(), ret[4])
 			continue
 		}
+		message := &Message{}
 		message.TimeLocal = t
 
 		// 2133
@@ -287,7 +299,7 @@ func (l *LogProcess) Process() {
 		// GET /foo?query=t HTTP/1.0
 		reqSli := strings.Split(ret[6], " ")
 		if len(reqSli) != 3 {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeProcessErr
 			log.Println("strings.Split fail", ret[6])
 			continue
 		}
@@ -296,7 +308,7 @@ func (l *LogProcess) Process() {
 
 		u, err := url.Parse(reqSli[1])
 		if err != nil {
-			TypeMonitorChan <- TypeErrNum
+			TypeMonitorChan <- TypeProcessErr
 			log.Println("url parse fail:", err)
 			continue
 		}
@@ -339,28 +351,44 @@ func main() {
 		panic(err)
 	}
 
-	w := &WriteToInfluxDB{
-		influxDBDsn: influxDsn,
+	writer, err := NewWriter(influxDsn, token)
+	if err != nil {
+		panic(err)
 	}
 
 	lp := &LogProcess{
 		rc:    make(chan []byte, 200), // 讀取的模塊會比解析來得快, 所以使用buffer的 channel
 		wc:    make(chan *Message, 200),
 		read:  reader,
-		write: w,
+		write: writer,
 	}
+
 	go lp.read.Read(lp.rc)
-	for i := 0; i < 2; i++ {
+	for i := 0; i < processNum; i++ {
 		go lp.Process()
 	}
-	for i := 0; i < 4; i++ {
+	for i := 0; i < writeNum; i++ {
 		go lp.write.Write(lp.wc)
 	}
 
 	// 監控模組
 	m := &Monitor{
-		startTime: time.Now(),
-		data:      SystemInfo{},
+		listenPort: listenPort,
+		startTime:  time.Now(),
 	}
 	m.start(lp)
+
+	c := make(chan os.Signal)
+	signal.Notify(c, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGUSR1)
+	for s := range c {
+		switch s {
+		case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
+			log.Println("capture exit signal:", s)
+			os.Exit(1)
+		case syscall.SIGUSR1: // 用戶自訂訊號
+			log.Println(m.systemStatus(lp))
+		default:
+			log.Println("capture other signal:", s)
+		}
+	}
 }
