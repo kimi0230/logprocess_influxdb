@@ -29,6 +29,23 @@ type ReadFromTail struct {
 	path  string
 }
 
+func NewReader(path string) (Reader, error) {
+	var stat syscall.Stat_t
+	if err := syscall.Stat(path, &stat); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ReadFromTail{
+		inode: stat.Ino,
+		fd:    f,
+		path:  path,
+	}, nil
+}
+
 func (r *ReadFromTail) Read(rc chan []byte) {
 	defer close(rc)
 	var stat syscall.Stat_t
@@ -156,52 +173,6 @@ func (m *Monitor) start(lp *LogProcess) {
 	http.ListenAndServe(":9193", nil)
 }
 
-func NewReader(path string) (Reader, error) {
-	var stat syscall.Stat_t
-	if err := syscall.Stat(path, &stat); err != nil {
-		return nil, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-
-	return &ReadFromTail{
-		inode: stat.Ino,
-		fd:    f,
-		path:  path,
-	}, nil
-}
-
-type ReadFromFile struct {
-	path string // 讀取文件的路徑
-}
-
-func (r *ReadFromFile) Read(rc chan []byte) {
-	// 讀取模塊
-	// 打開文件
-	f, err := os.Open(r.path)
-	if err != nil {
-		panic(fmt.Sprintf("open file error : %s", err.Error()))
-	}
-	// 從文件末尾開始執行讀取
-	f.Seek(0, 2)
-	rd := bufio.NewReader(f)
-	for {
-		line, err := rd.ReadBytes('\n')
-		if err == io.EOF {
-			// 讀到末尾
-			time.Sleep(500 * time.Microsecond)
-			continue
-		} else if err != nil {
-			panic(fmt.Sprintf("ReadBytes error : %s", err.Error()))
-		}
-		// 寫入到 read channel
-		TypeMonitorChan <- TypeHandleLine
-		rc <- line[:len(line)-1]
-	}
-}
-
 type WriteToInfluxDB struct {
 	influxDBDsn string // influx data source
 }
@@ -263,13 +234,13 @@ func (l *LogProcess) Process() {
 	// 從 read channel 中讀取每行日誌數據
 	for v := range l.rc {
 		// 第 0 項是數據本身
+		TypeMonitorChan <- TypeHandleLine
 		ret := r.FindStringSubmatch(string(v))
 		if len(ret) != 14 {
 			TypeMonitorChan <- TypeErrNum
 			log.Println("FindStringSubmatch fail:", string(v))
 			continue
 		}
-		message := &Message{}
 
 		// [04/Mar/2018:13:49:52 +0000]
 		t, err := time.ParseInLocation("02/Jan/2006:15:04:05 +0000", ret[4], loc)
@@ -278,6 +249,7 @@ func (l *LogProcess) Process() {
 			log.Println("ParseInLocation fail:", err.Error(), ret[4])
 			continue
 		}
+		message := &Message{}
 		message.TimeLocal = t
 
 		// 2133
