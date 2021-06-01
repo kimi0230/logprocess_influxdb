@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	influxdb2 "github.com/influxdata/influxdb-client-go/v2"
@@ -20,6 +21,53 @@ import (
 
 type Reader interface {
 	Read(rc chan []byte)
+}
+
+type ReadFromTail struct {
+	inode uint64
+	fd    *os.File
+	path  string
+}
+
+func (r *ReadFromTail) Read(rc chan []byte) {
+	defer close(rc)
+	var stat syscall.Stat_t
+
+	r.fd.Seek(0, 2) // seek 到末尾
+	bf := bufio.NewReader(r.fd)
+
+	for {
+		line, err := bf.ReadBytes('\n')
+		if err == io.EOF {
+			if err := syscall.Stat(r.path, &stat); err != nil {
+				// 文件切割, 但是新文件還沒生成
+				time.Sleep(1 * time.Second)
+			} else {
+				nowInode := stat.Ino
+				if nowInode == r.inode {
+					// 無新的數據產生
+					time.Sleep(1 * time.Second)
+				} else {
+					// 文件切割, 重新開啟檔案
+					r.fd.Close()
+					fd, err := os.Open(r.path)
+					if err != nil {
+						panic(fmt.Sprintf("Open file err: %s", err.Error()))
+					}
+					r.fd = fd
+					bf = bufio.NewReader(fd)
+					r.inode = nowInode
+				}
+			}
+			continue
+		} else if err != nil {
+			log.Printf("readFromTail ReadBytes err: %s", err.Error())
+			TypeMonitorChan <- TypeReadErr
+			continue
+		}
+
+		rc <- line[:len(line)-1]
+	}
 }
 
 type Writer interface {
@@ -51,11 +99,16 @@ type SystemInfo struct {
 }
 
 const (
-	TypeHandleLine = 0
-	TypeErrNum     = 1
+	TypeHandleLine = iota
+	TypeReadErr
+	TypeErrNum
 )
 
-var TypeMonitorChan = make(chan int, 200)
+var (
+	path, influxDsn, listenPort, token string
+	processNum, writeNum               int
+	TypeMonitorChan                    = make(chan int, 200)
+)
 
 type Monitor struct {
 	startTime time.Time
@@ -101,6 +154,23 @@ func (m *Monitor) start(lp *LogProcess) {
 	})
 
 	http.ListenAndServe(":9193", nil)
+}
+
+func NewReader(path string) (Reader, error) {
+	var stat syscall.Stat_t
+	if err := syscall.Stat(path, &stat); err != nil {
+		return nil, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ReadFromTail{
+		inode: stat.Ino,
+		fd:    f,
+		path:  path,
+	}, nil
 }
 
 type ReadFromFile struct {
@@ -249,17 +319,26 @@ func (l *LogProcess) Process() {
 	}
 }
 
-const token = "7Vft2nXp1IkgLMu1VaLVEqylPKeJMqO1KLLfwRa1wxOg92DwMqHEjKkTqbqj03k49Inw-cD2rmBQOok-Dij2BQ=="
+const defaultToken = "7Vft2nXp1IkgLMu1VaLVEqylPKeJMqO1KLLfwRa1wxOg92DwMqHEjKkTqbqj03k49Inw-cD2rmBQOok-Dij2BQ=="
+
+func init() {
+	flag.StringVar(&path, "path", "./access.log", "log file path")
+	// influxDsn: http://ip:port@Organization@bucket@measurement@precision
+	flag.StringVar(&influxDsn, "influxDsn", "http://127.0.0.1:8086@kimiORG@kk@myMeasure@s", "influxDB dsn")
+	flag.StringVar(&listenPort, "listenPort", "9193", "monitor port")
+	flag.StringVar(&token, "token", defaultToken, "token")
+	flag.IntVar(&processNum, "processNum", 1, "process goroutine num")
+	flag.IntVar(&writeNum, "writeNum", 1, "write goroutine num")
+	flag.Parse()
+}
 
 func main() {
-	var path, influxDsn string
-	flag.StringVar(&path, "path", "./access.log", "read file path")
-	flag.StringVar(&influxDsn, "influxDsn", "http://127.0.0.1:8086@kimiORG@kk@myMeasure@s", "influx data source")
-	flag.Parse()
-
-	r := &ReadFromFile{
-		path: "./access.log",
+	fmt.Println("===== Optimization =====")
+	reader, err := NewReader(path)
+	if err != nil {
+		panic(err)
 	}
+
 	w := &WriteToInfluxDB{
 		influxDBDsn: influxDsn,
 	}
@@ -267,7 +346,7 @@ func main() {
 	lp := &LogProcess{
 		rc:    make(chan []byte, 200), // 讀取的模塊會比解析來得快, 所以使用buffer的 channel
 		wc:    make(chan *Message, 200),
-		read:  r,
+		read:  reader,
 		write: w,
 	}
 	go lp.read.Read(lp.rc)

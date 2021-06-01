@@ -37,10 +37,24 @@ default account/passwword is `admin/admin`
 
 ## docker compose
 ``` shell
-# Background execution
+# Background execution (docker run)
 docker-compose up -d
-# Stop execution
+
+# (docker ps)
+docker-compose ps 
+
+# show logs (docker logs)
+docker-compose logs
+
+# start (docker start)
+docker-compose start
+
+# Stop execution (docker stop)
 docker-compose stop
+
+# remove (docker rm)
+docker-compose down
+
 # Stop execution, then remove  
 docker-compose rm -s
 ```
@@ -50,7 +64,10 @@ docker-compose rm -s
 curl 127.0.0.1:9193/monitor
 ```
 
+## Screenshot
+### influxDB
 ![influxDB](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/data_explore.png)
+### grafana
 ![grafana](https://github.com/kimi0230/logprocess_influxdb/blob/master/screenshot/grafana.png)
 
 # Reference
