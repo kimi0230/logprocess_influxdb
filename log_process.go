@@ -249,7 +249,7 @@ func (l *LogProcess) Process() {
 	}
 }
 
-const token = "DnTFbAQGqnbCyFVXYIuh1NCwjYKWtfRDnnD6Ej1I2I-yIDR5CKZ4KV87Pcx1hgfuUFJeQseaBNsB1M92lyf1Yg=="
+const token = "7Vft2nXp1IkgLMu1VaLVEqylPKeJMqO1KLLfwRa1wxOg92DwMqHEjKkTqbqj03k49Inw-cD2rmBQOok-Dij2BQ=="
 
 func main() {
 	var path, influxDsn string

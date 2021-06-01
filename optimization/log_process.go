@@ -319,10 +319,10 @@ func (l *LogProcess) Process() {
 	}
 }
 
-const defaultToken = "DnTFbAQGqnbCyFVXYIuh1NCwjYKWtfRDnnD6Ej1I2I-yIDR5CKZ4KV87Pcx1hgfuUFJeQseaBNsB1M92lyf1Yg=="
+const defaultToken = "7Vft2nXp1IkgLMu1VaLVEqylPKeJMqO1KLLfwRa1wxOg92DwMqHEjKkTqbqj03k49Inw-cD2rmBQOok-Dij2BQ=="
 
 func init() {
-	flag.StringVar(&path, "path", "", "log file path")
+	flag.StringVar(&path, "path", "./access.log", "log file path")
 	// influxDsn: http://ip:port@Organization@bucket@measurement@precision
 	flag.StringVar(&influxDsn, "influxDsn", "http://127.0.0.1:8086@kimiORG@kk@myMeasure@s", "influxDB dsn")
 	flag.StringVar(&listenPort, "listenPort", "9193", "monitor port")
@@ -333,14 +333,12 @@ func init() {
 }
 
 func main() {
-	var path, influxDsn string
-	flag.StringVar(&path, "path", "./access.log", "read file path")
-	flag.StringVar(&influxDsn, "influxDsn", "http://127.0.0.1:8086@kimiORG@kk@myMeasure@s", "influx data source")
-	flag.Parse()
-
-	r := &ReadFromFile{
-		path: "./access.log",
+	fmt.Println("===== Optimization =====")
+	reader, err := NewReader(path)
+	if err != nil {
+		panic(err)
 	}
+
 	w := &WriteToInfluxDB{
 		influxDBDsn: influxDsn,
 	}
@@ -348,7 +346,7 @@ func main() {
 	lp := &LogProcess{
 		rc:    make(chan []byte, 200), // 讀取的模塊會比解析來得快, 所以使用buffer的 channel
 		wc:    make(chan *Message, 200),
-		read:  r,
+		read:  reader,
 		write: w,
 	}
 	go lp.read.Read(lp.rc)
