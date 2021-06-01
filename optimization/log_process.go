@@ -94,10 +94,19 @@ func (r *ReadFromTail) Read(rc chan []byte) {
 }
 
 type LogProcess struct {
-	rc    chan []byte   // read channel
-	wc    chan *Message // write channel
-	read  Reader
-	write Writer
+	rc     chan []byte   // read channel
+	wc     chan *Message // write channel
+	reader Reader
+	writer Writer
+}
+
+func NewLogProcess(reader Reader, writer Writer) *LogProcess {
+	return &LogProcess{
+		rc:     make(chan []byte, 200),
+		wc:     make(chan *Message, 200),
+		reader: reader,
+		writer: writer,
+	}
 }
 
 type Message struct {
@@ -356,19 +365,14 @@ func main() {
 		panic(err)
 	}
 
-	lp := &LogProcess{
-		rc:    make(chan []byte, 200), // 讀取的模塊會比解析來得快, 所以使用buffer的 channel
-		wc:    make(chan *Message, 200),
-		read:  reader,
-		write: writer,
-	}
+	lp := NewLogProcess(reader, writer)
 
-	go lp.read.Read(lp.rc)
+	go lp.reader.Read(lp.rc)
 	for i := 0; i < processNum; i++ {
 		go lp.Process()
 	}
 	for i := 0; i < writeNum; i++ {
-		go lp.write.Write(lp.wc)
+		go lp.writer.Write(lp.wc)
 	}
 
 	// 監控模組
