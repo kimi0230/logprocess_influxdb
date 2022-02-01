@@ -3,8 +3,6 @@
 Read and write requsets into [influxdb](https://www.influxdata.com/) Concurrently.
 Logs in Explore by [grafana](https://grafana.com/).
 
-From imooc [https://www.imooc.com/learn/982](https://www.imooc.com/learn/982) and [imooc_logprocess](https://github.com/itsmikej/imooc_logprocess)
-
 ## influxdb
 ### install
 
@@ -76,3 +74,5 @@ curl 127.0.0.1:9193/monitor
 * https://github.com/influxdata/influxdb-client-go
 * https://docs.influxdata.com/influxdb/v2.0/
 * https://db-engines.com/en/ranking
+* [https://www.imooc.com/learn/982](https://www.imooc.com/learn/982)
+* [imooc_logprocess](https://github.com/itsmikej/imooc_logprocess)
